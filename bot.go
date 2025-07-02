@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	tele "gopkg.in/telebot.v4"
 	"net/mail"
 )
@@ -83,4 +84,18 @@ func handleText(c tele.Context) error {
 	}
 
 	return nil
+}
+
+func currentWeek(c tele.Context) error {
+	fmt.Println("Current week called")
+	return c.Respond(&tele.CallbackResponse{
+		Text: "Current week",
+	})
+}
+
+func nextWeek(c tele.Context) error {
+	fmt.Println("Next week called")
+	return c.Respond(&tele.CallbackResponse{
+		Text: "Next week",
+	})
 }
