@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"gopkg.in/gomail.v2"
 	"math/rand"
 	"strconv"
 )
@@ -13,10 +14,20 @@ func SendVerificationCode(email string, chatId int) error {
 	validationCodeList[chatId] = strconv.Itoa(100 + rand.Intn(999))
 	chatIdToEmailDict[chatId] = email
 
-	//TODO: send email
 	fmt.Println("Verification code sent:" + validationCodeList[chatId])
 
-	return nil
+	m := gomail.NewMessage()
+	m.SetHeader("From", "some@mail.com")
+	m.SetHeader("To", email)
+	m.SetHeader("Subject", "Подтверждение email")
+	m.SetBody("text/plain", "Код портверждения: "+validationCodeList[chatId])
+
+	return dialer.DialAndSend(m)
+}
+
+func clearVerificationCode(chatId int) {
+	delete(validationCodeList, chatId)
+	delete(chatIdToEmailDict, chatId)
 }
 
 func CheckVerificationCode(chatId int, code string) bool {
