@@ -159,7 +159,7 @@ func handleText(c tele.Context) error {
 					panic(err)
 				}
 
-				timer = time.AfterFunc(15*time.Second, func() {
+				timer = time.AfterFunc(time.Hour, func() {
 					clearVerificationCode(chatId)
 					c.Send("Время подтверждения email истекло, прошу запустить процедуру ещё раз -> /start")
 				})

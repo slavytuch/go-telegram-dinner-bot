@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"gopkg.in/gomail.v2"
 	"math/rand"
 	"os"
@@ -14,8 +13,6 @@ var chatIdToEmailDict = make(map[int]string)
 func SendVerificationCode(email string, chatId int) error {
 	validationCodeList[chatId] = strconv.Itoa(100 + rand.Intn(999))
 	chatIdToEmailDict[chatId] = email
-
-	fmt.Println("Verification code sent:" + validationCodeList[chatId])
 
 	m := gomail.NewMessage()
 	m.SetHeader("From", os.Getenv("SMTP_FROM"))
