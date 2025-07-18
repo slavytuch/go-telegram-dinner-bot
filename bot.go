@@ -4,6 +4,7 @@ import (
 	"github.com/jinzhu/now"
 	tele "gopkg.in/telebot.v4"
 	"net/mail"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -13,7 +14,10 @@ const (
 	inlineNextWeek    = "next-week"
 	inlineToggleSub   = "toggle-subscription"
 	inlineBackToList  = "back-to-list"
+	inlineSubList     = "sub-list"
 )
+
+var b *tele.Bot
 
 func initBot(t string) error {
 	pref := tele.Settings{
@@ -66,6 +70,50 @@ func initBot(t string) error {
 			"⚠️ - Вы записаны, но не придете", &keyboardWeeks)
 	})
 
+	b.Handle("/list", func(c tele.Context) error {
+		var buttonList []tele.Row
+
+		ds := now.BeginningOfWeek()
+		de := now.EndOfWeek().AddDate(0, 0, 7)
+
+		countList, err := findSubscriptionCount(ds, de)
+		if err != nil {
+			return err
+		}
+
+		m := &tele.ReplyMarkup{}
+
+		for ds.Day() != de.Day() {
+			if ds.Weekday() == time.Saturday || ds.Weekday() == time.Sunday {
+				ds = ds.Add(time.Hour * 24)
+				continue
+			}
+
+			count := 0
+			dbCount, ok := countList[ds.Format("0201")]
+			if ok {
+				count = dbCount
+			}
+
+			buttonList = append(buttonList, m.Row(m.Data([]string{
+				"Воскресенье",
+				"Понедельник",
+				"Вторник",
+				"Среда",
+				"Четверг",
+				"Пятница",
+				"Суббота",
+			}[ds.Weekday()]+", "+ds.Format("02")+" "+[]string{
+				"Января", "Февраля", "Марта", "Апреля", "Мая", "Июня", "Июля", "Августа", "Сентября", "Октября", "Ноября", "Декабря",
+			}[ds.Month()]+" - "+strconv.Itoa(count), inlineSubList, ds.Format("20060102"))))
+
+			ds = ds.Add(time.Hour * 24)
+		}
+
+		m.Inline(buttonList...)
+		return c.Send("Выберете день, для просмотра списка", m)
+	})
+
 	b.Handle(tele.OnCallback, func(c tele.Context) error {
 		data := c.Callback().Data
 
@@ -97,6 +145,31 @@ func initBot(t string) error {
 			c.Respond()
 
 			return c.Edit(c.Message().Text, &keyboardWeeks)
+		case inlineSubList:
+			pd, err := time.Parse("20060102", data)
+			if err != nil {
+				return err
+			}
+
+			l, err := finSubscriptionsByDay(pd)
+
+			if len(l) <= 0 {
+				return c.Respond(&tele.CallbackResponse{
+					Text: "Ничего нет",
+				})
+			}
+
+			var result []string
+			counter := 1
+			for _, name := range l {
+				result = append(result, strconv.Itoa(counter)+". "+name)
+				counter++
+			}
+
+			c.Respond()
+			return c.Send(
+				"Список записавшихся на " + pd.Format("02.01") + ":\n" +
+					strings.Join(result, "\n"))
 		}
 
 		return c.Respond(&tele.CallbackResponse{

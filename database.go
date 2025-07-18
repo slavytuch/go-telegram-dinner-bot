@@ -140,6 +140,51 @@ func findSubscriptionList(chatId int, ds time.Time, de time.Time) ([]Subscriptio
 	return subs, nil
 }
 
+func findSubscriptionCount(ds time.Time, de time.Time) (map[string]int, error) {
+	rows, err := db.Query("SELECT COUNT(*), date FROM subscribes WHERE date >= ? && date <= ? GROUP BY date", ds, de)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	result := make(map[string]int)
+	var count int
+	var date time.Time
+
+	for rows.Next() {
+		if err := rows.Scan(&count, &date); err != nil {
+			return nil, err
+		}
+
+		result[date.Format("0201")] = count
+	}
+
+	return result, nil
+}
+
+func finSubscriptionsByDay(d time.Time) ([]string, error) {
+	var result []string
+
+	rows, err := db.Query("SELECT telegraph_chats.fio FROM telegraph_chats INNER JOIN subscribes ON subscribes.telegraph_chats_id = telegraph_chats.id WHERE date = ?", d)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var name string
+	for rows.Next() {
+		rows.Scan(&name)
+
+		result = append(result, name)
+	}
+
+	return result, nil
+}
+
 func createSubscription(chatId int, date time.Time, s int) error {
 	chat, err := findChat(chatId)
 
