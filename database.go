@@ -22,10 +22,20 @@ type Chat struct {
 }
 
 type Subscription struct {
-	Id     int
-	ChatId int
-	Date   time.Time
-	Status int
+	Id       int
+	ChatId   int
+	Date     time.Time
+	Status   int
+	FIO      string
+	ParentId sql.NullInt64
+}
+
+func (s *Subscription) parse(row *sql.Rows) error {
+	return row.Scan(&s.Id, &s.ChatId, &s.Date, &s.Status, &s.FIO, &s.ParentId)
+}
+
+func (s *Subscription) parseRow(row *sql.Row) error {
+	return row.Scan(&s.Id, &s.ChatId, &s.Date, &s.Status, &s.FIO, &s.ParentId)
 }
 
 const (
@@ -57,6 +67,9 @@ func connectToDatabase(host string, port string, user string, password string, d
 	}
 
 	return nil
+}
+func subscriptionSelect() string {
+	return "SELECT subscribes.id, telegraph_chats.chat_id, subscribes.date, subscribes.status, telegraph_chats.fio, subscribes.parent_id FROM subscribes INNER JOIN telegraph_chats ON subscribes.telegraph_chats_id = telegraph_chats.id"
 }
 
 func getMenu() (*Menu, error) {
@@ -100,10 +113,42 @@ func SetChatFio(chatId int, chatFio string) error {
 	return err
 }
 
-func findSubscription(chatId int, date time.Time) (*Subscription, error) {
+func findSubscriptionByChat(chatId int, date time.Time) (*Subscription, error) {
 	var s Subscription
 
-	err := db.QueryRow("SELECT subscribes.id, telegraph_chats.chat_id, date, status FROM subscribes INNER JOIN telegraph_chats ON subscribes.telegraph_chats_id = telegraph_chats.id where telegraph_chats.chat_id = ? and date = ?", chatId, date).Scan(&s.Id, &s.ChatId, &s.Date, &s.Status)
+	err := s.parseRow(db.QueryRow(subscriptionSelect()+" where telegraph_chats.chat_id = ? and date = ?", chatId, date))
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+
+		return nil, err
+	}
+
+	return &s, nil
+}
+
+func findSubscriptionById(id int) (*Subscription, error) {
+	var s Subscription
+
+	err := s.parseRow(db.QueryRow(subscriptionSelect()+" where subscribes.id = ?", id))
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+
+		return nil, err
+	}
+
+	return &s, nil
+}
+
+func findBookingSubscription(id int) (*Subscription, error) {
+	var s Subscription
+
+	err := s.parseRow(db.QueryRow(subscriptionSelect()+" where subscribes.parent_id = ?", id))
 
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -117,7 +162,7 @@ func findSubscription(chatId int, date time.Time) (*Subscription, error) {
 }
 
 func findSubscriptionList(chatId int, ds time.Time, de time.Time) ([]Subscription, error) {
-	rows, err := db.Query("SELECT subscribes.id, telegraph_chats.chat_id, date, status FROM subscribes INNER JOIN telegraph_chats ON subscribes.telegraph_chats_id = telegraph_chats.id where telegraph_chats.chat_id = ? and date >= ? and date <= ?", chatId, ds, de)
+	rows, err := db.Query(subscriptionSelect()+" where telegraph_chats.chat_id = ? and date >= ? and date <= ?", chatId, ds, de)
 
 	if err != nil {
 		return nil, err
@@ -130,7 +175,30 @@ func findSubscriptionList(chatId int, ds time.Time, de time.Time) ([]Subscriptio
 	for rows.Next() {
 		var sub Subscription
 
-		if err := rows.Scan(&sub.Id, &sub.ChatId, &sub.Date, &sub.Status); err != nil {
+		if err := sub.parse(rows); err != nil {
+			return nil, err
+		}
+
+		subs = append(subs, sub)
+	}
+
+	return subs, nil
+}
+
+func findRefusedSubscriptionList(ds time.Time, de time.Time, c int) ([]Subscription, error) {
+	rows, err := db.Query(subscriptionSelect()+" LEFT JOIN subscribes booked on subscribes.id = booked.parent_id LEFT JOIN telegraph_chats btc on booked.telegraph_chats_id = telegraph_chats.id WHERE subscribes.status = ? and subscribes.date >= ? and subscribes.date <= ? or (subscribes.status = ? and btc.chat_id = ?)", Refuse, ds, de, Booked, c)
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var subs []Subscription
+
+	for rows.Next() {
+		var sub Subscription
+
+		if err := sub.parse(rows); err != nil {
 			return nil, err
 		}
 
@@ -193,6 +261,18 @@ func createSubscription(chatId int, date time.Time, s int) error {
 	}
 
 	_, err = db.Exec("INSERT INTO subscribes(telegraph_chats_id, date, status) VALUES (?, ?, ?)", chat.Id, date, s)
+
+	return err
+}
+
+func createBookingSubscription(chatId int, date time.Time, s int, p int) error {
+	chat, err := findChat(chatId)
+
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec("INSERT INTO subscribes(telegraph_chats_id, date, status, parent_id) VALUES (?, ?, ?, ?)", chat.Id, date, s, p)
 
 	return err
 }

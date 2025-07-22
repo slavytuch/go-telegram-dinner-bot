@@ -15,6 +15,7 @@ const (
 	inlineToggleSub   = "toggle-subscription"
 	inlineBackToList  = "back-to-list"
 	inlineSubList     = "sub-list"
+	inlineBook        = "book"
 )
 
 var b *tele.Bot
@@ -114,6 +115,28 @@ func initBot(t string) error {
 		return c.Send("Выберете день, для просмотра списка", m)
 	})
 
+	b.Handle("/booking", func(c tele.Context) error {
+		subList, err := findRefusedSubscriptionList(now.BeginningOfDay(), now.EndOfDay(), int(c.Chat().ID))
+		if err != nil {
+			return err
+		}
+
+		if len(subList) <= 0 {
+			return c.Send("❌ Свободных обедов пока нет ❌\n" +
+				"Если вы знаете, что кто-то не пришел и не отметил это в боте, пожалуйста, сообщите @DariaRazan. Возможно, обед все же освободится! 🍽😊")
+		}
+
+		m, err := createBookingMarkup(subList)
+
+		if err != nil {
+			return err
+		}
+
+		return c.Send("🍽 Свободные обеды на сегодня!\n"+
+			"Вот список обедов, от которых отказались. Вы можете забронировать один из них и насладиться вкусным обедом без угрызений совести! 😋\n"+
+			"Приятного аппетита! 🍴", m)
+	})
+
 	b.Handle(tele.OnCallback, func(c tele.Context) error {
 		data := c.Callback().Data
 
@@ -170,6 +193,115 @@ func initBot(t string) error {
 			return c.Send(
 				"Список записавшихся на " + pd.Format("02.01") + ":\n" +
 					strings.Join(result, "\n"))
+		case inlineBook:
+			pr, err := strconv.Atoi(data)
+			if err != nil {
+				return err
+			}
+
+			sub, err := findSubscriptionById(pr)
+
+			if err != nil {
+				return err
+			}
+
+			if sub == nil {
+				return c.Respond(&tele.CallbackResponse{
+					Text: "Не могу найти подписку",
+				})
+			}
+
+			if sub.Date.Day() != now.BeginningOfDay().Day() {
+				return c.Respond(&tele.CallbackResponse{
+					Text: "Забронировать за прошлые дни нельзя",
+				})
+			}
+
+			switch sub.Status {
+			case Active:
+				return c.Respond(&tele.CallbackResponse{
+					Text: "Похоже что запись больше нельзя забронировать",
+				})
+			case Refuse:
+				userSub, err := findSubscriptionByChat(int(c.Chat().ID), now.BeginningOfDay())
+
+				if err != nil {
+					return err
+				}
+
+				if userSub == nil {
+					break
+				}
+
+				if !userSub.ParentId.Valid {
+					return c.Respond(&tele.CallbackResponse{
+						Text: "У вас уже есть подписка на сегодня",
+					})
+				}
+
+				err = deleteSubscription(userSub.Id)
+
+				if err != nil {
+					return err
+				}
+
+				break
+			case Booked:
+				bookedSub, err := findBookingSubscription(sub.Id)
+				if err != nil {
+					return err
+				}
+
+				if bookedSub == nil {
+					break
+				}
+
+				if bookedSub.ChatId != int(c.Chat().ID) {
+					return c.Respond(&tele.CallbackResponse{
+						Text: "Запись уже забронировал " + bookedSub.FIO,
+					})
+				}
+
+				err = updateSubscriptionStatus(sub.Id, Refuse)
+
+				if err != nil {
+					return err
+				}
+
+				err = deleteSubscription(bookedSub.Id)
+				if err != nil {
+					return err
+				}
+				err = replaceBookingButtons(c)
+				if err != nil {
+					return err
+				}
+
+				return c.Respond(&tele.CallbackResponse{
+					Text: "Бронь удалена",
+				})
+			}
+
+			err = updateSubscriptionStatus(sub.Id, Booked)
+
+			if err != nil {
+				return err
+			}
+
+			err = createBookingSubscription(sub.ChatId, sub.Date, Active, sub.Id)
+
+			if err != nil {
+				return err
+			}
+
+			err = replaceBookingButtons(c)
+			if err != nil {
+				return err
+			}
+
+			return c.Respond(&tele.CallbackResponse{
+				Text: "Бронь успешно оформлена",
+			})
 		}
 
 		return c.Respond(&tele.CallbackResponse{
@@ -326,7 +458,7 @@ func toggleSubscription(c tele.Context, t time.Time) error {
 
 	isLate := time.Now().Hour() >= 12 && time.Now().AddDate(0, 0, 1).After(t)
 
-	sub, err := findSubscription(int(c.Chat().ID), t)
+	sub, err := findSubscriptionByChat(int(c.Chat().ID), t)
 
 	if err != nil {
 		c.Respond(&tele.CallbackResponse{
@@ -395,6 +527,10 @@ func toggleSubscription(c tele.Context, t time.Time) error {
 		return replaceWeekButtons(c, now.With(t).Monday())
 	}
 
+	if sub.ParentId.Valid {
+		err = updateSubscriptionStatus(int(sub.ParentId.Int64), Refuse)
+	}
+
 	err = deleteSubscription(sub.Id)
 
 	if err != nil {
@@ -410,4 +546,46 @@ func toggleSubscription(c tele.Context, t time.Time) error {
 	})
 
 	return replaceWeekButtons(c, now.With(t).Monday())
+}
+
+func createBookingMarkup(subList []Subscription) (*tele.ReplyMarkup, error) {
+	var buttonList []tele.Row
+
+	m := &tele.ReplyMarkup{}
+
+	for _, sub := range subList {
+		subName := sub.FIO
+
+		if sub.Status == Booked {
+			subName += " - забронирован"
+		}
+
+		buttonList = append(buttonList, m.Row(m.Data(subName, inlineBook, strconv.Itoa(sub.Id))))
+	}
+
+	m.Inline(buttonList...)
+
+	return m, nil
+}
+
+func replaceBookingButtons(c tele.Context) error {
+	subList, err := findRefusedSubscriptionList(now.BeginningOfDay(), now.EndOfDay(), int(c.Chat().ID))
+	if err != nil {
+		return err
+	}
+
+	if len(subList) <= 0 {
+		return c.Edit("❌ Свободных обедов пока нет ❌\n" +
+			"Если вы знаете, что кто-то не пришел и не отметил это в боте, пожалуйста, сообщите @DariaRazan. Возможно, обед все же освободится! 🍽😊")
+	}
+
+	m, err := createBookingMarkup(subList)
+
+	if err != nil {
+		return err
+	}
+
+	return c.Edit("🍽 Свободные обеды на сегодня!\n"+
+		"Вот список обедов, от которых отказались. Вы можете забронировать один из них и насладиться вкусным обедом без угрызений совести! 😋\n"+
+		"Приятного аппетита! 🍴", m)
 }
