@@ -16,11 +16,16 @@ const (
 	inlineBackToList  = "back-to-list"
 	inlineSubList     = "sub-list"
 	inlineBook        = "book"
+	inlineConfirmMenu = "confirmMenu"
+	inlineDenyMenu    = "denyMenu"
 )
 
 var b *tele.Bot
+var listeningForMenu bool
+var newMenu string
+var debug bool
 
-func initBot(t string) error {
+func initBot(t string, d bool) error {
 	pref := tele.Settings{
 		Token:  t,
 		Poller: &tele.LongPoller{Timeout: 10 * time.Second},
@@ -29,7 +34,8 @@ func initBot(t string) error {
 	if err != nil {
 		return err
 	}
-
+	listeningForMenu = false
+	debug = d
 	keyboardWeeks := tele.ReplyMarkup{
 		InlineKeyboard: [][]tele.InlineButton{{
 			tele.InlineButton{
@@ -135,6 +141,12 @@ func initBot(t string) error {
 		return c.Send("🍽 Свободные обеды на сегодня!\n"+
 			"Вот список обедов, от которых отказались. Вы можете забронировать один из них и насладиться вкусным обедом без угрызений совести! 😋\n"+
 			"Приятного аппетита! 🍴", m)
+	})
+
+	b.Handle("/setmenu", func(c tele.Context) error {
+		listeningForMenu = true
+
+		return c.Send("Жду в следующем сообщении меню. Для отмены - отправь \"отмена\"")
 	})
 
 	b.Handle(tele.OnCallback, func(c tele.Context) error {
@@ -302,6 +314,34 @@ func initBot(t string) error {
 			return c.Respond(&tele.CallbackResponse{
 				Text: "Бронь успешно оформлена",
 			})
+		case inlineConfirmMenu:
+			err := updateMenu(newMenu)
+
+			if err != nil {
+				return err
+			}
+
+			c.Edit("Новое меню установлено. Должно прийти ниже:", &tele.ReplyMarkup{})
+
+			listeningForMenu = false
+
+			chatList, err := getAllChats()
+
+			if err != nil {
+				return err
+			}
+
+			if debug {
+				return c.Send("Добавлено новое меню:\n" + newMenu)
+			}
+
+			for _, chatId := range chatList {
+				b.Send(tele.ChatID(chatId), "Добавлено новое меню:\n"+newMenu)
+			}
+
+			return nil
+		case inlineDenyMenu:
+			return c.Edit("Меню удалил, слушаю новое меню, если нужно отменить - отправь \"отмена\"")
 		}
 
 		return c.Respond(&tele.CallbackResponse{
@@ -351,6 +391,34 @@ func handleText(c tele.Context) error {
 
 	if err != nil {
 		return err
+	}
+
+	if listeningForMenu {
+		newMenu = c.Text()
+
+		if len(newMenu) <= 0 {
+			return c.Send("Получил пустое сообщение. Всё ещё жду меню")
+		}
+
+		if strings.ToLower(newMenu) == "отмена" {
+			listeningForMenu = false
+			return c.Send("Больше меню не жду")
+		}
+
+		keyboardMenu := tele.ReplyMarkup{
+			InlineKeyboard: [][]tele.InlineButton{{
+				tele.InlineButton{
+					Text: "Всё верно",
+					Data: inlineConfirmMenu,
+				},
+				tele.InlineButton{
+					Text: "Нет, всё плохо",
+					Data: inlineDenyMenu,
+				},
+			}},
+		}
+
+		return c.Send("Отправляю всем новое меню:\n"+newMenu, &keyboardMenu)
 	}
 
 	if chat == nil {

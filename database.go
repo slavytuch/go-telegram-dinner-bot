@@ -288,3 +288,33 @@ func deleteSubscription(id int) error {
 
 	return err
 }
+
+func updateMenu(menu string) error {
+	_, err := db.Exec("UPDATE menu SET menu = ?", menu)
+
+	return err
+}
+
+func getAllChats() ([]int, error) {
+	var result []int
+
+	rows, err := db.Query("SELECT id from telegraph_chats")
+
+	if err != nil {
+		return nil, err
+	}
+
+	for rows.Next() {
+		var chatId int
+
+		err := rows.Scan(&chatId)
+
+		if err != nil {
+			return nil, err
+		}
+
+		result = append(result, chatId)
+	}
+
+	return result, nil
+}

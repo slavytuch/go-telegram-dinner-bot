@@ -37,5 +37,5 @@ func main() {
 	dialer = gomail.NewDialer(os.Getenv("SMTP_HOST"), smtpp, os.Getenv("SMTP_LOGIN"), os.Getenv("SMTP_PASSWORD"))
 
 	fmt.Println("Bot is up")
-	log.Fatal(initBot(os.Getenv("TELEGRAM_BOT_TOKEN")))
+	log.Fatal(initBot(os.Getenv("TELEGRAM_BOT_TOKEN"), os.Getenv("APP_ENV") != "production"))
 }
