@@ -31,6 +31,7 @@ type Subscription struct {
 }
 
 func (s *Subscription) parse(row *sql.Rows) error {
+	defer row.Close()
 	return row.Scan(&s.Id, &s.ChatId, &s.Date, &s.Status, &s.FIO, &s.ParentId)
 }
 
@@ -303,6 +304,8 @@ func getAllChats() ([]int, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	defer rows.Close()
 
 	for rows.Next() {
 		var chatId int

@@ -21,7 +21,7 @@ const (
 )
 
 var b *tele.Bot
-var listeningForMenu bool
+var listeningForMenu map[int]bool
 var newMenu string
 var debug bool
 
@@ -34,8 +34,8 @@ func initBot(t string, d bool) error {
 	if err != nil {
 		return err
 	}
-	listeningForMenu = false
 	debug = d
+	listeningForMenu = make(map[int]bool)
 	keyboardWeeks := tele.ReplyMarkup{
 		InlineKeyboard: [][]tele.InlineButton{{
 			tele.InlineButton{
@@ -144,7 +144,7 @@ func initBot(t string, d bool) error {
 	})
 
 	b.Handle("/setmenu", func(c tele.Context) error {
-		listeningForMenu = true
+		listeningForMenu[int(c.Chat().ID)] = true
 
 		return c.Send("Жду в следующем сообщении меню. Для отмены - отправь \"отмена\"")
 	})
@@ -323,7 +323,7 @@ func initBot(t string, d bool) error {
 
 			c.Edit("Новое меню установлено. Должно прийти ниже:", &tele.ReplyMarkup{})
 
-			listeningForMenu = false
+			delete(listeningForMenu, int(c.Chat().ID))
 
 			chatList, err := getAllChats()
 
@@ -393,7 +393,7 @@ func handleText(c tele.Context) error {
 		return err
 	}
 
-	if listeningForMenu {
+	if lfm, ok := listeningForMenu[chatId]; ok && lfm {
 		newMenu = c.Text()
 
 		if len(newMenu) <= 0 {
@@ -401,7 +401,7 @@ func handleText(c tele.Context) error {
 		}
 
 		if strings.ToLower(newMenu) == "отмена" {
-			listeningForMenu = false
+			delete(listeningForMenu, chatId)
 			return c.Send("Больше меню не жду")
 		}
 
